@@ -199,7 +199,12 @@ export default function ProjectDetail() {
                     <td className="small">{s.recipient_name || '—'}</td>
                     <td>
                       {(canOperate || isLogistics) && s.status !== 'delivered' && (
-                        <button className="sm ghost" onClick={() => setAction({ type: 'ship_advance', ship: s })}>推进</button>
+                        <>
+                          <button className="sm ghost" onClick={() => setAction({ type: 'ship_advance', ship: s })}>推进</button>
+                          {(canOperate || isLogistics) && (
+                            <button className="sm ghost" onClick={() => setAction({ type: 'cold_reading', ship: s })}>🌡 测温</button>
+                          )}
+                        </>
                       )}
                     </td>
                   </tr>
@@ -366,6 +371,9 @@ function ActionModal({ kind, projectId, onClose, onDone }) {
       {type === 'ship_advance' && (
         <ShipAdvanceForm ship={kind.ship} />
       )}
+      {type === 'cold_reading' && (
+        <ColdReadingForm ship={kind.ship} projectId={projectId} onDone={onDone} onClose={onClose} />
+      )}
       {type === 'cost' && (
         <div className="grid grid-2">
           <div><label>成本类型</label>
@@ -394,7 +402,7 @@ function ActionModal({ kind, projectId, onClose, onDone }) {
           <textarea rows="4" onChange={(e) => set('summary', e.target.value)} placeholder="如：本季受冰雹影响…建议增设防雹网、上线净重磅识模板…" />
         </>
       )}
-      {type !== 'ship_advance' && <div className="mt16"><button onClick={submit}>提交</button></div>}
+      {type !== 'ship_advance' && type !== 'cold_reading' && <div className="mt16"><button onClick={submit}>提交</button></div>}
     </Modal>
   )
 }
@@ -418,6 +426,27 @@ function ShipAdvanceForm({ ship }) {
         try { await post(`/projects/${ship.project_id}/shipments/${ship.id}/advance`, f); toast('状态已推进'); location.reload() }
         catch (e) { toast(e.message, true) }
       }}>{label}</button>
+    </>
+  )
+}
+
+function ColdReadingForm({ ship, projectId, onDone, onClose }) {
+  const toast = useToast()
+  const [f, setF] = useState({ point: '', temp_c: 3 })
+  const submit = async () => {
+    if (!f.point) return toast('请填写测温节点', true)
+    try {
+      await post(`/projects/${projectId}/shipments/${ship.id}/readings`, f)
+      toast('测温点已记录，将进入冷链温度曲线'); onDone(); onClose()
+    } catch (e) { toast(e.message, true) }
+  }
+  return (
+    <>
+      <label>测温节点</label>
+      <input value={f.point} onChange={(e) => setF({ ...f, point: e.target.value })} placeholder="如：济南分拨中转 / 送达前" />
+      <label>车厢温度 ℃（生鲜冷链标准 0-6℃）</label>
+      <input type="number" step="0.1" value={f.temp_c} onChange={(e) => setF({ ...f, temp_c: Number(e.target.value) })} />
+      <button className="mt16" onClick={submit}>记录测温</button>
     </>
   )
 }

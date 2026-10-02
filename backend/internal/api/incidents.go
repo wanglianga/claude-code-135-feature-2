@@ -131,12 +131,32 @@ func (s *Server) handleIncidentByID(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN users u ON u.id=e.actor_id
 		WHERE e.incident_id=$1 ORDER BY e.created_at`, id)
 	comps, _ := s.queryRows(ctx, `SELECT * FROM compensations WHERE incident_id=$1 ORDER BY id`, id)
+	claim, _ := s.queryOne(ctx, `SELECT * FROM bad_fruit_claims WHERE incident_id=$1`, id)
+	var claimDetail map[string]interface{}
+	if claim != nil {
+		claimID, _ := claim["id"].(int64)
+		reships, _ := s.queryRows(ctx, `SELECT * FROM reship_orders WHERE claim_id=$1 ORDER BY id`, claimID)
+		notices, _ := s.queryRows(ctx, `SELECT * FROM logistics_notices WHERE claim_id=$1 ORDER BY id`, claimID)
+		claimDetail = claim
+		claimDetail["reship_orders"] = reships
+		claimDetail["logistics_notices"] = notices
+	}
+	// 关联运单的冷链温度曲线（坏果判定证据链）
+	var coldRows []map[string]interface{}
+	if claim != nil {
+		if sid, ok := claim["shipment_id"].(int64); ok && sid > 0 {
+			coldRows, _ = s.queryRows(ctx,
+				`SELECT * FROM cold_chain_readings WHERE shipment_id=$1 ORDER BY recorded_at`, sid)
+		}
+	}
 
 	if r.Method == http.MethodGet {
 		writeJSON(w, 200, map[string]interface{}{
-			"incident":      inc,
-			"events":        events,
-			"compensations": comps,
+			"incident":         inc,
+			"events":           events,
+			"compensations":    comps,
+			"bad_fruit_claim":  claimDetail,
+			"cold_chain_curve": coldRows,
 		})
 		return
 	}

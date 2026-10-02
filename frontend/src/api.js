@@ -83,6 +83,36 @@ export const SHIP_STATUS_LABEL = {
 }
 export const SHIP_STATUS_FLOW = ['planned', 'picked', 'packed', 'shipped', 'delivered']
 
+// 坏果赔付判定
+export const CLAIM_PLAN_LABEL = {
+  pending: '待判定',
+  reship: '补发',
+  refund: '退款',
+  logistics_liability: '物流追责',
+}
+export const CLAIM_PLAN_HINT = {
+  reship: '坏果比例较低（<10%）：补发等值果品',
+  refund: '坏果比例 ≥10%：按坏果量退还货款',
+  logistics_liability: '冷链曲线证实脱冷：向物流追责（运费与补发成本分开）',
+}
+export const LIABILITY_LABEL = {
+  farm: '农场责任',
+  logistics: '物流责任',
+  shared: '共同责任',
+}
+export const RESHIP_STATUS_LABEL = {
+  pending: '待同步',
+  synced: '已同步物流',
+  shipped: '补发已发出',
+  delivered: '补发已送达',
+}
+export const NOTICE_STATUS_LABEL = {
+  pending: '待同步',
+  synced: '已同步物流',
+  acknowledged: '物流已确认',
+  closed: '已关闭',
+}
+
 export function fmtMoney(v) {
   if (v === null || v === undefined) return '—'
   return '¥' + Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })

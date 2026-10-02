@@ -5,6 +5,8 @@ import { Tag, ShipFlow, Modal, Empty, Stat, useToast } from '../components/ui'
 const ORDER_STATUS = { paid: '待发货', shipping: '履约中', completed: '已完成', refunded: '已退款' }
 const COMP_LABEL = { cash: '现金赔付', reship: '补发', insurance: '保险赔付', credit: '下季抵扣' }
 const COMP_CLS = { cash: 'red', reship: 'amber', insurance: 'teal', credit: 'purple' }
+const CLAIM_PLAN_LABEL = { reship: '补发', refund: '退款', logistics_liability: '物流追责' }
+const RESHIP_STATUS_LABEL = { pending: '待同步', synced: '已同步物流', shipped: '补发已发出', delivered: '补发已送达' }
 
 export default function MyAdoptions() {
   const [list, setList] = useState([])
@@ -82,6 +84,27 @@ export default function MyAdoptions() {
                               <td><Tag cls={COMP_CLS[c.kind]}>{COMP_LABEL[c.kind]}</Tag></td>
                               <td>{fmtMoney(c.amount)}</td>
                               <td>{c.status === 'paid' ? '已到账' : '处理中'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    <h3 className="mt16">🫐 坏果赔付判定（认养档案）</h3>
+                    {(a.archive_notes || []).length === 0 ? <Empty text="暂无坏果赔付档案" /> : a.archive_notes.map((n) => (
+                      <div key={n.id} className="card" style={{ background: '#fff7ed', padding: 10, marginBottom: 8 }}>
+                        <div className="small"><Tag cls="red">{CLAIM_PLAN_LABEL[n.detail?.plan] || '坏果赔付'}</Tag> <span className="muted">{fmtDate(n.created_at)} · 批次 {n.batch_no}</span></div>
+                        <div className="small mt8">{n.summary}</div>
+                      </div>
+                    ))}
+                    {(a.reship_orders || []).length > 0 && (
+                      <table>
+                        <thead><tr><th>补发单</th><th>重量</th><th>物流状态</th></tr></thead>
+                        <tbody>
+                          {a.reship_orders.map((r) => (
+                            <tr key={r.id}>
+                              <td className="small">{r.reship_no}<br /><span className="muted">{r.ship_tracking_no || '待物流回填运单号'}</span></td>
+                              <td>{r.weight_kg}kg</td>
+                              <td><Tag cls={r.shipment_status === 'delivered' ? 'green' : 'teal'}>{RESHIP_STATUS_LABEL[r.status]}</Tag></td>
                             </tr>
                           ))}
                         </tbody>

@@ -33,6 +33,8 @@ func (s *Server) projectSubresource(w http.ResponseWriter, r *http.Request, id i
 			s.completeHarvest(w, r, id, subID, ownFarm)
 		case parts[0] == "shipments" && parts[2] == "advance":
 			s.advanceShipment(w, r, id, subID, ownFarm)
+		case parts[0] == "shipments" && parts[2] == "readings":
+			s.addColdReading(w, r, id, subID, ownFarm)
 		default:
 			writeErr(w, 404, "未知操作")
 		}
@@ -359,7 +361,8 @@ func (s *Server) completeHarvest(w http.ResponseWriter, r *http.Request, project
 	actual, _ := f64(in, "actual_kg")
 	badRate, _ := f64(in, "bad_rate_pct")
 	row, err := s.queryOne(r.Context(),
-		`UPDATE harvest_tasks SET actual_kg=$1, bad_rate_pct=$2, status='done', picker_id=COALESCE(picker_id,$3)
+		`UPDATE harvest_tasks SET actual_kg=$1, bad_rate_pct=$2, status='done',
+		       picker_id=COALESCE(picker_id,$3), harvested_at=COALESCE(harvested_at, now())
 		 WHERE id=$4 RETURNING *`,
 		actual, badRate, u.ID, taskID)
 	if err != nil {
@@ -367,6 +370,53 @@ func (s *Server) completeHarvest(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	writeJSON(w, 200, row)
+}
+
+// addColdReading 物流登记冷链测温点（温度曲线是坏果赔付判定的关联证据）
+func (s *Server) addColdReading(w http.ResponseWriter, r *http.Request, projectID, shipID int64, ownFarm bool) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "方法不允许")
+		return
+	}
+	u := s.currentUser(r)
+	if !(ownFarm || u.Role == "logistics" || u.Role == "admin") {
+		writeErr(w, 403, "只有物流方可以登记冷链测温")
+		return
+	}
+	var in map[string]interface{}
+	if err := decode(r, &in); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	temp, hasTemp := f64(in, "temp_c")
+	if !hasTemp {
+		writeErr(w, 400, "temp_c 必填（测温点温度 ℃）")
+		return
+	}
+	var batchNo string
+	err := s.Pool.QueryRow(r.Context(),
+		`SELECT batch_no FROM shipments WHERE id=$1 AND project_id=$2`, shipID, projectID).
+		Scan(&batchNo)
+	if err != nil {
+		writeErr(w, 404, "运单不存在")
+		return
+	}
+	data := map[string]interface{}{
+		"shipment_id": shipID,
+		"project_id":  projectID,
+		"batch_no":    batchNo,
+		"point":       in["point"],
+		"temp_c":      temp,
+	}
+	if in["recorded_at"] != nil {
+		data["recorded_at"] = in["recorded_at"] // 缺省走 DEFAULT now()
+	}
+	row, err := s.insertRow(r.Context(), "cold_chain_readings", data)
+	if err != nil {
+		writeErr(w, 400, "登记失败："+err.Error())
+		return
+	}
+	writeJSON(w, 201, row)
 }
 
 // advanceShipment 发货状态机：planned→picked→packed→shipped→delivered

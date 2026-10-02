@@ -32,6 +32,13 @@ func (s *Server) routes() {
 	m.HandleFunc("/api/insurance-claims", s.requireAuth(s.handleInsuranceClaims))
 	m.HandleFunc("/api/insurance-claims/", s.requireAuth(s.handleInsuranceClaimByID))
 
+	// 坏果赔付判定（证据链关联 / 客服按比例判定 / 认养档案 / 补发同步物流 / 冷链责任同步物流）
+	m.HandleFunc("/api/bad-fruit-claims", s.requireAuth(s.handleBadFruitClaims))
+	m.HandleFunc("/api/bad-fruit-claims/", s.requireAuth(s.handleBadFruitClaimByID))
+	m.HandleFunc("/api/reship-orders", s.requireAuth(s.handleReshipOrders))
+	m.HandleFunc("/api/logistics-notices", s.requireAuth(s.handleLogisticsNotices))
+	m.HandleFunc("/api/logistics-notices/", s.requireAuth(s.handleLogisticsNoticeByID))
+
 	// 回访 / 证书 / 直播 / 参观 / 团购 / 公益
 	m.HandleFunc("/api/callbacks", s.requireAuth(s.handleCallbacks))
 	m.HandleFunc("/api/live", s.handleLive)

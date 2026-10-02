@@ -393,6 +393,10 @@ func (s *Server) projectDetail(w http.ResponseWriter, r *http.Request, id int64)
 		`SELECT sh.*, a.recipient_name, a.address FROM shipments sh
 		 LEFT JOIN adoptions a ON a.id=sh.adoption_id
 		 WHERE sh.project_id=$1 ORDER BY sh.seq, sh.id`, id)
+	coldReadings, _ := s.queryRows(ctx,
+		`SELECT cr.* FROM cold_chain_readings cr WHERE cr.project_id=$1 ORDER BY cr.recorded_at`, id)
+	badClaims, _ := s.queryRows(ctx,
+		`SELECT c.* FROM bad_fruit_claims c WHERE c.project_id=$1 ORDER BY c.id`, id)
 	incidents, _ := s.queryRows(ctx,
 		`SELECT i.*, u.name AS reporter_name FROM incidents i LEFT JOIN users u ON u.id=i.reporter_id
 		 WHERE i.project_id=$1 ORDER BY i.created_at`, id)
@@ -423,19 +427,21 @@ func (s *Server) projectDetail(w http.ResponseWriter, r *http.Request, id int64)
 		}
 	}
 	writeJSON(w, 200, map[string]interface{}{
-		"project":          p,
-		"logs":             logs,
-		"maturity_checks":  checks,
-		"harvest_tasks":    harvests,
-		"sorting":          sorting,
-		"shipments":        shipments,
-		"incidents":        incidents,
-		"insurance_claims": claims,
-		"charity":          charity,
-		"group_buys":       groupBuys,
-		"live_streams":     live,
-		"settlement":       settlement,
-		"sum_harvested":    harvested,
-		"sum_shipped":      shipped,
+		"project":             p,
+		"logs":                logs,
+		"maturity_checks":     checks,
+		"harvest_tasks":       harvests,
+		"sorting":             sorting,
+		"shipments":           shipments,
+		"cold_chain_readings": coldReadings,
+		"bad_fruit_claims":    badClaims,
+		"incidents":           incidents,
+		"insurance_claims":    claims,
+		"charity":             charity,
+		"group_buys":          groupBuys,
+		"live_streams":        live,
+		"settlement":          settlement,
+		"sum_harvested":       harvested,
+		"sum_shipped":         shipped,
 	})
 }
