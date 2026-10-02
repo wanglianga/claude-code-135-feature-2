@@ -83,6 +83,27 @@ export const SHIP_STATUS_LABEL = {
 }
 export const SHIP_STATUS_FLOW = ['planned', 'picked', 'packed', 'shipped', 'delivered']
 
+export const CLAIM_SCHEME_LABEL = {
+  reship: '补发',
+  refund: '退款',
+  logistics_claim: '物流追责',
+}
+export const CLAIM_SCHEME_CLS = {
+  reship: 'amber',
+  refund: 'red',
+  logistics_claim: 'teal',
+}
+export const CLAIM_STATUS_LABEL = {
+  open: '待判定',
+  judged: '已判定待关闭',
+  closed: '已关闭',
+}
+export const CLAIM_STATUS_CLS = {
+  open: 'red',
+  judged: 'amber',
+  closed: 'green',
+}
+
 export function fmtMoney(v) {
   if (v === null || v === undefined) return '—'
   return '¥' + Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })

@@ -246,6 +246,10 @@ func (s *Server) projectSubresource(w http.ResponseWriter, r *http.Request, id i
 			writeErr(w, 400, "包装规格必填")
 			return
 		}
+		photos := in["photos"]
+		if photos == nil {
+			photos = []interface{}{}
+		}
 		row, err := s.insertRow(ctx, "sorting_records", map[string]interface{}{
 			"project_id": id,
 			"batch_no":   batchNo,
@@ -253,7 +257,8 @@ func (s *Server) projectSubresource(w http.ResponseWriter, r *http.Request, id i
 			"spec":       spec,
 			"weight_kg":  weight,
 			"box_count":  boxCount,
-		})
+			"photos":     photos,
+		}, "photos")
 		if err != nil {
 			writeErr(w, 400, "登记失败："+err.Error())
 			return

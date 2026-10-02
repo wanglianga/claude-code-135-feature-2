@@ -201,6 +201,13 @@ export default function ProjectDetail() {
                       {(canOperate || isLogistics) && s.status !== 'delivered' && (
                         <button className="sm ghost" onClick={() => setAction({ type: 'ship_advance', ship: s })}>推进</button>
                       )}
+                      {(canOperate || isLogistics) && (s.status === 'shipped' || s.status === 'delivered') && (
+                        <button className="sm ghost" onClick={() => setAction({ type: 'cold_chain', ship: s })}>
+                          🌡 {s.cold_chain_curve?.length ? '更新冷链' : '冷链曲线'}
+                        </button>
+                      )}
+                      {s.cold_breached && <Tag cls="red">脱冷 {s.cold_temp_max}℃</Tag>}
+                      {!s.cold_breached && s.cold_chain_curve?.length > 0 && <Tag cls="green">冷链达标</Tag>}
                     </td>
                   </tr>
                 ))}
@@ -349,6 +356,11 @@ function ActionModal({ kind, projectId, onClose, onDone }) {
           <div style={{ gridColumn: '1/-1' }}><label>包装规格</label><input onChange={(e) => set('spec', e.target.value)} placeholder="如：精品大果80-85mm/12枚装" /></div>
           <div><label>重量 kg</label><input type="number" onChange={(e) => set('weight_kg', Number(e.target.value))} /></div>
           <div><label>箱数</label><input type="number" onChange={(e) => set('box_count', Number(e.target.value))} /></div>
+          <div style={{ gridColumn: '1/-1' }}>
+            <label>分拣照片（每行一个图片地址，坏果核定时作为证据）</label>
+            <textarea rows="2" onChange={(e) => set('photos', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean).map((url) => ({ caption: '分拣照片', url })))}
+                      placeholder="/static/demo/sort-1.jpg" />
+          </div>
         </div>
       )}
       {type === 'shipment' && (
@@ -365,6 +377,9 @@ function ActionModal({ kind, projectId, onClose, onDone }) {
       )}
       {type === 'ship_advance' && (
         <ShipAdvanceForm ship={kind.ship} />
+      )}
+      {type === 'cold_chain' && (
+        <ColdChainForm ship={kind.ship} onDone={() => { onDone(); onClose() }} />
       )}
       {type === 'cost' && (
         <div className="grid grid-2">
@@ -394,8 +409,33 @@ function ActionModal({ kind, projectId, onClose, onDone }) {
           <textarea rows="4" onChange={(e) => set('summary', e.target.value)} placeholder="如：本季受冰雹影响…建议增设防雹网、上线净重磅识模板…" />
         </>
       )}
-      {type !== 'ship_advance' && <div className="mt16"><button onClick={submit}>提交</button></div>}
+      {type !== 'ship_advance' && type !== 'cold_chain' && <div className="mt16"><button onClick={submit}>提交</button></div>}
     </Modal>
+  )
+}
+
+function ColdChainForm({ ship, onDone }) {
+  const toast = useToast()
+  const [text, setText] = useState(JSON.stringify([
+    { t: '发车', temp: 2.0 }, { t: '中转', temp: 3.5 }, { t: '到达', temp: 2.8 },
+  ], null, 0))
+  return (
+    <>
+      <p className="muted small">运单 #{ship.id}（{ship.tracking_no || '无运单号'}）。登记温度点
+        [{"{\"t\":\"时间\",\"temp\":温度}"}]，最高温超 6℃ 自动标记脱冷；曲线将作为坏果赔付判定证据。</p>
+      {ship.cold_chain_curve?.length > 0 && (
+        <div className="small muted">当前：{ship.cold_temp_min}℃ ~ {ship.cold_temp_max}℃{ship.cold_breached ? '，已判脱冷' : '，达标'}</div>
+      )}
+      <textarea rows="6" value={text} onChange={(e) => setText(e.target.value)} />
+      <button className="mt16" onClick={async () => {
+        try {
+          const curve = JSON.parse(text)
+          await post(`/shipments/${ship.id}/cold-chain`, { cold_chain_curve: curve })
+          toast('冷链温度曲线已登记')
+          onDone()
+        } catch (e) { toast(e.message, true) }
+      }}>提交冷链曲线</button>
+    </>
   )
 }
 

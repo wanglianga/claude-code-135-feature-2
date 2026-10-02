@@ -156,6 +156,19 @@ func (s *Server) handleMyAdoptions(w http.ResponseWriter, r *http.Request) {
 			 WHERE c.adoption_id=$1 ORDER BY c.id`, aid)
 		cbs, _ := s.queryRows(r.Context(),
 			`SELECT * FROM callbacks WHERE adoption_id=$1`, aid)
+		// 坏果赔付判定结论（同步认养档案）
+		claims, _ := s.queryRows(r.Context(), `
+			SELECT c.id, c.incident_id, c.bad_rate_pct, c.total_count, c.bad_count,
+			       c.scheme, c.recommended_scheme, c.refund_amount, c.reship_cost, c.freight_cost,
+			       c.cold_chain_responsible, c.conclusion, c.status,
+			       c.reship_shipment_id, c.created_at, c.judged_at, c.closed_at,
+			       sh.tracking_no AS reship_tracking_no, sh.status AS reship_status
+			FROM bad_fruit_claims c
+			LEFT JOIN shipments sh ON sh.id=c.reship_shipment_id
+			WHERE c.adoption_id=$1 ORDER BY c.id`, aid)
+		if claims == nil {
+			claims = []map[string]interface{}{}
+		}
 
 		var shipped, plannedKg float64
 		allDelivered := len(ships) > 0
@@ -225,6 +238,7 @@ func (s *Server) handleMyAdoptions(w http.ResponseWriter, r *http.Request) {
 		row["shipments"] = ships
 		row["compensations"] = comps
 		row["callbacks"] = cbs
+		row["bad_fruit_claims"] = claims
 		row["rights_fulfillment"] = fulfilled
 		result = append(result, row)
 	}

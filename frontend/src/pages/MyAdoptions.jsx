@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { get, post, KIND_EMOJI, fmtMoney, fmtKg, fmtDay, fmtDate, SHIP_STATUS_LABEL } from '../api'
+import { useNavigate } from 'react-router-dom'
+import { get, post, KIND_EMOJI, fmtMoney, fmtKg, fmtDay, fmtDate, SHIP_STATUS_LABEL,
+  CLAIM_SCHEME_LABEL, CLAIM_SCHEME_CLS, CLAIM_STATUS_LABEL, CLAIM_STATUS_CLS } from '../api'
 import { Tag, ShipFlow, Modal, Empty, Stat, useToast } from '../components/ui'
+import { BadFruitFeedbackModal } from '../components/BadFruitClaim'
 
 const ORDER_STATUS = { paid: '待发货', shipping: '履约中', completed: '已完成', refunded: '已退款' }
 const COMP_LABEL = { cash: '现金赔付', reship: '补发', insurance: '保险赔付', credit: '下季抵扣' }
@@ -8,8 +11,9 @@ const COMP_CLS = { cash: 'red', reship: 'amber', insurance: 'teal', credit: 'pur
 
 export default function MyAdoptions() {
   const [list, setList] = useState([])
-  const [focus, setFocus] = useState(null) // address / callback / cert
+  const [focus, setFocus] = useState(null) // address / callback / cert / badfruit
   const [cur, setCur] = useState(null)
+  const nav = useNavigate()
   const load = useCallback(() => get('/my/adoptions').then(setList), [])
   useEffect(() => { load() }, [load])
 
@@ -97,6 +101,30 @@ export default function MyAdoptions() {
                         <div className="muted">续认建议：{c.renew_suggestion}</div>
                       </div>
                     ))}
+
+                    <h3 className="mt16">🫐 坏果赔付判定</h3>
+                    {(a.bad_fruit_claims || []).length === 0 ? <Empty text="暂无坏果赔付" /> : a.bad_fruit_claims.map((c) => (
+                      <div key={c.id} className="small" style={{ borderTop: '1px dashed #e5e7eb', paddingTop: 6 }}>
+                        <div className="row">
+                          <Tag cls="red">坏果率 {c.bad_rate_pct}%（{c.bad_count}/{c.total_count}）</Tag>
+                          <Tag cls={CLAIM_STATUS_CLS[c.status]}>{CLAIM_STATUS_LABEL[c.status]}</Tag>
+                          {c.scheme && <Tag cls={CLAIM_SCHEME_CLS[c.scheme]}>{CLAIM_SCHEME_LABEL[c.scheme]}</Tag>}
+                        </div>
+                        <div className="mt8">
+                          {c.scheme === 'refund' && <>退款 {fmtMoney(c.refund_amount)}</>}
+                          {c.scheme !== 'refund' && (c.reship_cost > 0 || c.freight_cost > 0) &&
+                            <>补发成本 {fmtMoney(c.reship_cost)} · 运费 {fmtMoney(c.freight_cost)}（分开核算）</>}
+                          {c.cold_chain_responsible && <Tag cls="teal">冷链责任已同步物流</Tag>}
+                        </div>
+                        {c.conclusion && <div className="muted mt8">客服结论：{c.conclusion}</div>}
+                        {c.reship_shipment_id && (
+                          <div className="muted">补发运单 #{c.reship_shipment_id}
+                            {c.reship_tracking_no ? `（${c.reship_tracking_no}）` : ''} ·
+                            {c.reship_status === 'delivered' ? '已送达' : c.reship_status === 'shipped' ? '运输中' : '待物流发货'}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -108,6 +136,9 @@ export default function MyAdoptions() {
                   {(a.callbacks || []).length === 0 && a.status === 'completed' && (
                     <button className="sm" onClick={() => { setCur(a); setFocus('callback') }}>📝 成熟度回访</button>
                   )}
+                  {(a.status === 'shipping' || a.status === 'completed') && (a.bad_fruit_claims || []).length === 0 && (
+                    <button className="sm amber" onClick={() => { setCur(a); setFocus('badfruit') }}>🫐 反馈坏果</button>
+                  )}
                   <span className="spacer" />
                   <span className="small muted">收货：{a.recipient_name} {a.phone} · {a.address}</span>
                 </div>
@@ -118,6 +149,12 @@ export default function MyAdoptions() {
       )}
       {focus === 'address' && cur && <AddressModal adoption={cur} onClose={() => setFocus(null)} onDone={load} />}
       {focus === 'callback' && cur && <CallbackModal adoption={cur} onClose={() => setFocus(null)} onDone={load} />}
+      {focus === 'badfruit' && cur && (
+        <BadFruitFeedbackModal adoption={cur} onClose={() => setFocus(null)} onDone={(iid) => {
+          setFocus(null); load()
+          if (iid) nav(`/incidents?focus=${iid}`)
+        }} />
+      )}
       {focus === 'cert' && cur && <CertModal adoption={cur} onClose={() => setFocus(null)} />}
     </>
   )

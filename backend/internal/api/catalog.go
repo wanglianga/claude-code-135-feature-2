@@ -179,6 +179,9 @@ func (s *Server) handlePlotLedger(w http.ResponseWriter, r *http.Request, id int
 	compensations, _ := s.queryRows(ctx,
 		`SELECT c.* FROM compensations c JOIN projects p ON p.id=c.project_id
 		 WHERE p.plot_id=$1 ORDER BY c.created_at`, id)
+	badFruitClaims, _ := s.queryRows(ctx,
+		`SELECT bc.* FROM bad_fruit_claims bc JOIN projects p ON p.id=bc.project_id
+		 WHERE p.plot_id=$1 ORDER BY bc.id`, id)
 	callbacks, _ := s.queryRows(ctx,
 		`SELECT cb.* FROM callbacks cb JOIN projects p ON p.id=cb.project_id
 		 WHERE p.plot_id=$1 ORDER BY cb.created_at`, id)
@@ -232,6 +235,7 @@ func (s *Server) handlePlotLedger(w http.ResponseWriter, r *http.Request, id int
 		"avg_bad_rate":     avgBad,
 		"incidents":        incidents,
 		"compensations":    compensations,
+		"bad_fruit_claims": badFruitClaims,
 		"callbacks":        callbacks,
 		"avg_satisfaction": avgSat,
 	})
@@ -396,6 +400,10 @@ func (s *Server) projectDetail(w http.ResponseWriter, r *http.Request, id int64)
 	incidents, _ := s.queryRows(ctx,
 		`SELECT i.*, u.name AS reporter_name FROM incidents i LEFT JOIN users u ON u.id=i.reporter_id
 		 WHERE i.project_id=$1 ORDER BY i.created_at`, id)
+	badClaims, _ := s.queryRows(ctx,
+		`SELECT c.*, a.recipient_name FROM bad_fruit_claims c
+		 LEFT JOIN adoptions a ON a.id=c.adoption_id
+		 WHERE c.project_id=$1 ORDER BY c.id`, id)
 	claims, _ := s.queryRows(ctx,
 		`SELECT * FROM insurance_claims WHERE project_id=$1 ORDER BY applied_at`, id)
 	charity, _ := s.queryRows(ctx,
@@ -430,6 +438,7 @@ func (s *Server) projectDetail(w http.ResponseWriter, r *http.Request, id int64)
 		"sorting":          sorting,
 		"shipments":        shipments,
 		"incidents":        incidents,
+		"bad_fruit_claims": badClaims,
 		"insurance_claims": claims,
 		"charity":          charity,
 		"group_buys":       groupBuys,

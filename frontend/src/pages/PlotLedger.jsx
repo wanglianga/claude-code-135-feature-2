@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   get, fmtMoney, fmtKg, fmtDate, KIND_EMOJI, INCIDENT_LABEL, INCIDENT_COLOR,
+  CLAIM_SCHEME_LABEL, CLAIM_SCHEME_CLS, CLAIM_STATUS_LABEL, CLAIM_STATUS_CLS,
 } from '../api'
 import { Stat, Tag, Empty, ShipFlow } from '../components/ui'
 
@@ -108,7 +109,7 @@ export default function PlotLedger() {
           <thead><tr><th>批次</th><th>计划</th><th>规格</th><th>重量</th><th>冷链路线</th><th>状态</th><th>坏果率</th></tr></thead>
           <tbody>
             {d.shipments.map((s) => (
-              <tr key={s.id}><td>第{s.seq}批</td><td>{s.plan_date}</td><td className="small">{s.pack_spec}</td>
+              <tr key={s.id}><td>第{s.seq}批{s.is_reship ? ' 📦补发' : ''}</td><td>{s.plan_date}</td><td className="small">{s.pack_spec}</td>
                 <td>{s.weight_kg != null ? fmtKg(s.weight_kg) : '—'}</td><td className="small muted">{s.cold_route}</td>
                 <td><ShipFlow status={s.status} /></td>
                 <td>{s.status === 'planned' ? '—' : s.bad_fruit_rate + '%'}</td></tr>
@@ -144,6 +145,26 @@ export default function PlotLedger() {
               {d.compensations.length === 0 && <tr><td colSpan="3"><Empty text="无赔付" /></td></tr>}
             </tbody>
           </table>
+
+          <h3 className="mt16">🫐 坏果赔付判定（证据保留 / 运费与补发成本分开）</h3>
+          {(d.bad_fruit_claims || []).length === 0 ? <Empty text="无坏果赔付单" /> : (
+            <table>
+              <thead><tr><th>坏果率</th><th>方案</th><th>退款</th><th>补发成本</th><th>运费</th><th>冷链责任</th><th>状态</th></tr></thead>
+              <tbody>
+                {d.bad_fruit_claims.map((c) => (
+                  <tr key={c.id}>
+                    <td><Tag cls="red">{c.bad_rate_pct}%</Tag></td>
+                    <td>{c.scheme ? <Tag cls={CLAIM_SCHEME_CLS[c.scheme]}>{CLAIM_SCHEME_LABEL[c.scheme]}</Tag> : '—'}</td>
+                    <td>{fmtMoney(c.refund_amount)}</td>
+                    <td>{fmtMoney(c.reship_cost)}</td>
+                    <td>{fmtMoney(c.freight_cost)}</td>
+                    <td>{c.cold_chain_responsible ? <Tag cls="teal">已同步物流</Tag> : '否'}</td>
+                    <td><Tag cls={CLAIM_STATUS_CLS[c.status]}>{CLAIM_STATUS_LABEL[c.status]}</Tag></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <div className="card">

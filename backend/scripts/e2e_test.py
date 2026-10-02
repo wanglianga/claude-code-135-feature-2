@@ -257,6 +257,145 @@ check("结算含赔付与满意度", r["settlement"]["total_compensation"] >= 8 
 st, p5b = call("GET", "/api/projects/5")
 check("结算后项目标记完成", p5b["project"]["status"] == "completed", p5b["project"]["status"])
 
+# ---- 坏果赔付判定：证据关联 → 客服按坏果比例判定 → 补发/退款/物流追责 ----
+def deliver_shipment(project_id, adoption_id, token_advance, curve=None, seq=1):
+    st, r = call("POST", f"/api/projects/{project_id}/shipments", T["farmer"], {
+        "adoption_id": adoption_id, "seq": seq, "plan_date": "2026-10-20",
+        "pack_spec": "坏果赔付测试包装", "cold_route": "烟台-目的地冷链车", "weight_kg": 4})
+    assert st == 201, r
+    sid = r["id"]
+    for st_ in ("picked", "packed"):
+        call("POST", f"/api/projects/{project_id}/shipments/{sid}/advance", T["farmer"], {"status": st_})
+    st, r = call("POST", f"/api/projects/{project_id}/shipments/{sid}/advance", token_advance,
+                 {"status": "shipped", "logistics_company": "顺丰冷运", "tracking_no": f"CLAIM{sid}"})
+    assert st == 200, r
+    if curve is not None:
+        st, r = call("POST", f"/api/shipments/{sid}/cold-chain", T["logistics"],
+                     {"cold_chain_curve": curve})
+        assert st == 200, r
+    st, r = call("POST", f"/api/projects/{project_id}/shipments/{sid}/advance", T["logistics"],
+                 {"status": "delivered"})
+    assert st == 200 and r["status"] == "delivered", r
+    return sid
+
+# 包装员为本批次登记带照片的分拣记录（作为坏果核定证据）
+st, r = call("POST", "/api/projects/1/sorting", T["packer"],
+             {"spec": "坏果赔付证据分拣规格", "weight_kg": 12, "box_count": 4,
+              "photos": [{"caption": "分拣台照片", "url": "/static/demo/sort-evidence.jpg"}]})
+check("分拣记录支持上传分拣照片", st == 201 and len(r["photos"]) == 1, r)
+
+# 流程A：冷链达标 + 坏果率 22.2% → 补发（运费与补发成本分开）
+st, r = call("POST", "/api/adoptions", T["adopter2"], {
+    "project_id": 1, "shares": 1, "recipient_name": "吴琳", "phone": "13900000008",
+    "address": "杭州市西湖区文三路478号"})
+aid_a = r["adoption"]["id"]
+sid_a = deliver_shipment(1, aid_a, T["farmer"], [
+    {"t": "09:00", "temp": 2.1}, {"t": "13:00", "temp": 3.8}, {"t": "18:00", "temp": 1.4}])
+st, r = call("POST", f"/api/shipments/{sid_a}/cold-chain", T["adopter"],
+             {"cold_chain_curve": [{"t": "x", "temp": 2}]})
+check("非物流/农场不能登记冷链曲线", st == 403, r)
+st, r = call("POST", "/api/claims/bad-fruit", T["adopter2"], {
+    "adoption_id": aid_a, "shipment_id": sid_a, "total_count": 36, "bad_count": 8,
+    "open_box_photos": [{"caption": "开箱照", "url": "/static/demo/open-a.jpg"}],
+    "description": "8 枚碰压伤"})
+check("坏果反馈建工单并生成判定单", st == 201 and r["incident_id"] and r["claim"]["id"], r)
+cid_a, iid_a = r["claim"]["id"], r["incident_id"]
+c = r["claim"]
+check("坏果比例 22.22%", c["bad_rate_pct"] == 22.22, c["bad_rate_pct"])
+check("系统建议方案=补发", c["recommended_scheme"] == "reship", c["recommended_scheme"])
+check("关联采摘时间", c["harvest_at"] is not None, c["harvest_at"])
+check("关联分拣照片", len(c["sorting_photos"]) >= 1, c["sorting_photos"])
+check("关联签收时间/冷链路线/运单号", c["signed_at"] and "冷链车" in c["cold_route"] and c["tracking_no"] == f"CLAIM{sid_a}",
+      (c["signed_at"], c["cold_route"], c["tracking_no"]))
+check("保留开箱照片", len(c["open_box_photos"]) == 1, c["open_box_photos"])
+check("冷链达标未脱冷", c["cold_breached"] is False and abs(c["cold_temp_max"] - 3.8) < 0.001, (c["cold_breached"], c["cold_temp_max"]))
+st, _ = call("POST", "/api/claims/bad-fruit", T["adopter2"],
+             {"adoption_id": aid_a, "shipment_id": sid_a, "total_count": 36, "bad_count": 1})
+check("同一运单重复坏果赔付被拒", st == 409)
+st, _ = call("POST", f"/api/claims/bad-fruit/{cid_a}/judge", T["adopter2"],
+             {"scheme": "reship", "conclusion": "x"})
+check("认养人不能出具判定", st == 403)
+st, _ = call("POST", f"/api/claims/bad-fruit/{cid_a}/close", T["service"], {})
+check("未判定先关闭被拒", st == 409)
+st, r = call("POST", f"/api/claims/bad-fruit/{cid_a}/judge", T["service"], {
+    "scheme": "reship", "reship_cost": 30, "freight_cost": 12, "cold_chain_responsible": False,
+    "conclusion": "包装缓冲不足碰压伤，补发 8 枚；补发成本与运费分开核算。"})
+check("客服出具补发判定", st == 200 and r["claim"]["status"] == "judged", r)
+st, _ = call("POST", f"/api/claims/bad-fruit/{cid_a}/close", T["adopter2"], {})
+check("认养人不能关闭赔付", st == 403)
+st, r = call("POST", f"/api/claims/bad-fruit/{cid_a}/close", T["service"], {})
+check("客服关闭补发赔付", st == 200 and r["claim"]["status"] == "closed", r)
+reship_id = r["claim"]["reship_shipment_id"]
+check("补发订单同步物流端(planned+is_reship)", reship_id is not None, reship_id)
+st, p1n = call("GET", "/api/projects/1")
+rs = next(s for s in p1n["shipments"] if s["id"] == reship_id)
+check("补发运单标记 is_reship 并回链赔付单", rs["is_reship"] is True and rs["claim_id"] == cid_a and rs["status"] == "planned", rs)
+st, det = call("GET", f"/api/incidents/{iid_a}", T["service"])
+check("补发赔付记录按补发成本入账", any(x["kind"] == "reship" and x["amount"] == 30 for x in det["compensations"]), det["compensations"])
+check("补发关闭后工单转已赔付", det["incident"]["status"] == "compensated", det["incident"])
+st, ships = call("GET", "/api/shipments?reship=1", T["logistics"])
+check("物流端可查补发运单", st == 200 and any(s["id"] == reship_id for s in ships), st)
+st, lc = call("GET", "/api/claims/bad-fruit", T["logistics"])
+check("非冷链责任单不同步给物流", all(x["id"] != cid_a for x in lc), [x["id"] for x in lc])
+st, mine = call("GET", "/api/my/adoptions", T["adopter2"])
+ca = next(c for a in mine if a["id"] == aid_a for c in a["bad_fruit_claims"] if c["id"] == cid_a)
+check("赔付结论同步认养档案(补发成本/运费分列)",
+      ca["scheme"] == "reship" and ca["reship_cost"] == 30 and ca["freight_cost"] == 12 and ca["status"] == "closed", ca)
+st, led = call("GET", "/api/plots/1/ledger", T["farmer"])
+check("地块台账聚合坏果赔付单", any(x["id"] == cid_a for x in led["bad_fruit_claims"]), led.keys())
+
+# 流程B：冷链脱冷（9.4℃）+ 坏果率 50% → 物流追责
+st, r = call("POST", "/api/adoptions", T["adopter2"], {
+    "project_id": 1, "shares": 1, "recipient_name": "吴琳", "phone": "13900000008",
+    "address": "杭州市西湖区文三路478号"})
+aid_b = r["adoption"]["id"]
+sid_b = deliver_shipment(1, aid_b, T["logistics"], seq=2, curve=[
+    {"t": "08:00", "temp": 2.2}, {"t": "12:00", "temp": 7.8}, {"t": "16:00", "temp": 9.4},
+    {"t": "20:00", "temp": 6.1}, {"t": "24:00", "temp": 3.0}])
+st, r = call("POST", "/api/claims/bad-fruit", T["adopter2"], {
+    "adoption_id": aid_b, "total_count": 10, "bad_count": 5,
+    "open_box_photos": ["/static/demo/open-b1.jpg", "/static/demo/open-b2.jpg"]})
+check("脱冷运单坏果反馈成功", st == 201, r)
+cid_b = r["claim"]["id"]
+check("脱冷→建议物流追责(优先于退款)", r["claim"]["recommended_scheme"] == "logistics_claim", r["claim"]["recommended_scheme"])
+check("冷链曲线快照含脱冷极值", r["claim"]["cold_breached"] is True and abs(r["claim"]["cold_temp_max"] - 9.4) < 0.001
+      and len(r["claim"]["cold_chain_curve"]) == 5 and len(r["claim"]["open_box_photos"]) == 2, r["claim"])
+st, r = call("POST", f"/api/claims/bad-fruit/{cid_b}/judge", T["service"], {
+    "scheme": "logistics_claim", "reship_cost": 200, "freight_cost": 80,
+    "conclusion": "中转脱冷链致变质，物流担责，补发并向物流追偿运费。"})
+check("物流追责判定(冷链责任自动置真)", st == 200 and r["claim"]["cold_chain_responsible"] is True, r["claim"])
+st, r = call("POST", f"/api/claims/bad-fruit/{cid_b}/close", T["service"], {})
+check("关闭物流追责赔付并同步物流", st == 200 and r["claim"]["cold_synced_at"] is not None
+      and r["claim"]["reship_shipment_id"] is not None, r["claim"])
+st, lc = call("GET", "/api/claims/bad-fruit", T["logistics"])
+check("冷链责任判定同步给物流", any(x["id"] == cid_b and x["freight_cost"] == 80 for x in lc), [(x["id"], x["cold_chain_responsible"]) for x in lc])
+st, led = call("GET", "/api/plots/1/ledger", T["farmer"])
+check("运费(物流成本)与补发成本(赔付成本)分开入账",
+      sum(x["amount"] for x in led["costs"] if x["cost_type"] == "logistics") >= 80
+      and sum(x["amount"] for x in led["costs"] if x["cost_type"] == "compensation") >= 200, led["costs"])
+
+# 流程C：坏果率 40% 且冷链达标 → 退款（不产生补发运单）
+st, r = call("POST", "/api/adoptions", T["adopter2"], {
+    "project_id": 4, "shares": 1, "recipient_name": "吴琳", "phone": "13900000008",
+    "address": "杭州市西湖区文三路478号"})
+aid_c = r["adoption"]["id"]
+sid_c = deliver_shipment(4, aid_c, T["farmer"], seq=1)
+st, r = call("POST", "/api/claims/bad-fruit", T["adopter2"],
+             {"adoption_id": aid_c, "total_count": 10, "bad_count": 4})
+check("坏果率40%冷链达标→建议退款", st == 201 and r["claim"]["recommended_scheme"] == "refund",
+      (st, r.get("recommended_scheme")))
+cid_c, iid_c = r["claim"]["id"], r["incident_id"]
+st, r = call("POST", f"/api/claims/bad-fruit/{cid_c}/judge", T["service"],
+             {"scheme": "refund", "refund_amount": 269, "conclusion": "坏果率40%，全额退款。"})
+check("客服出具退款判定", st == 200 and r["claim"]["scheme"] == "refund", r)
+st, r = call("POST", f"/api/claims/bad-fruit/{cid_c}/close", T["service"], {})
+check("退款关闭不生成补发运单", st == 200 and r["claim"]["reship_shipment_id"] is None, r["claim"])
+st, det = call("GET", f"/api/incidents/{iid_c}", T["service"])
+check("退款按现金赔付记录到账", any(x["kind"] == "cash" and x["amount"] == 269 and x["status"] == "paid"
+                                for x in det["compensations"]), det["compensations"])
+st, all_claims = call("GET", "/api/claims/bad-fruit", T["service"])
+check("客服可查全部坏果赔付判定单", st == 200 and len(all_claims) >= 3, len(all_claims or []))
+
 # ---- 权限边界 ----
 st, r = call("POST", "/api/projects", T["adopter"], {"plot_id": 1, "batch_no": "X", "kind": "apple",
                                                      "title": "x", "price_per_share": 1})
